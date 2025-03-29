@@ -4,6 +4,7 @@ ipv6_address: none
 network_name: "lxdbr0"
 ipv4_address: "10.0.8.1/24"
 ipv4_nat: "true"
+ssh_key_path: "~/.ssh/k8s_lxd_key"
 # Variables pour le profil Kubernetes
 k8s_profile_name: k8s-profile1
 k8s_profile_config:
@@ -18,7 +19,17 @@ k8s_profile_config:
     lxc.mount.auto=proc:rw sys:rw cgroup:rw
   security.nesting: "true"
   security.privileged: "true"
-
+  # Configuration cloud-init pour SSH
+  user.user-data: |
+    #cloud-config
+    ssh_authorized_keys:
+      - {{ ssh_public_key }}
+    packages:
+      - openssh-server
+    runcmd:
+      - systemctl enable ssh
+      - systemctl start ssh
+      
 k8s_profile_devices:
   eth0:
     name: eth0

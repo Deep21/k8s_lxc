@@ -55,31 +55,50 @@
   debug:
     msg: "Le réseau {{ network_name }} existe déjà ou a été créé."
 
-- name: Créer le profil Kubernetes "{{ k8s_profile_name }}"
+- name: Vérifier si la clé SSH existe déjà
+  stat:
+    path: "{{ ssh_key_path }}"
+  register: ssh_key_file
+  
+- name: Générer une nouvelle paire de clés SSH
+  shell: |
+    ssh-keygen -t rsa -b 2048 -f {{ ssh_key_path }} -N ""
+  when: not ssh_key_file.stat.exists
+  
+- name: Récupérer la clé publique
+  shell: cat {{ ssh_key_path }}.pub
+  register: ssh_public_key_result
+  changed_when: false
+  
+- name: Définir la variable de clé publique
+  set_fact:
+    ssh_public_key: "{{ ssh_public_key_result.stdout }}"
+    
+# Créer le profil LXD avec la configuration mise à jour
+- name: Créer ou mettre à jour le profil LXD pour Kubernetes
   community.general.lxd_profile:
     name: "{{ k8s_profile_name }}"
     state: present
     config: "{{ k8s_profile_config }}"
-    devices: "{{ k8s_profile_devices }}"
 
-- name: Master kubernetes
-  community.general.lxd_container:
-    name: "node-{{ item }}"
-    state: started
-    source:
-      type: image
-      mode: pull
-      server: https://cloud-images.ubuntu.com/releases/
-      protocol: simplestreams
-      alias: "20.04"
-    profiles: ["{{ k8s_profile_name }}"]
-    wait_for_ipv4_addresses: true
-    timeout: 600
-  loop: "{{ range(1, node_count + 1) | list }}"
-  vars:
-    node_count: 1
+# - name: Master kubernetes
+#   community.general.lxd_container:
+#     name: "node-{{ item }}"
+#     state: started
+#     source:
+#       type: image
+#       mode: pull
+#       server: https://cloud-images.ubuntu.com/releases/
+#       protocol: simplestreams
+#       alias: "20.04"
+#     profiles: ["{{ k8s_profile_name }}"]
+#     wait_for_ipv4_addresses: true
+#     timeout: 600
+#   loop: "{{ range(1, node_count + 1) | list }}"
+#   vars:
+#     node_count: 1
 
-- name: Worker kubernetes
+# - name: Worker kubernetes
   community.general.lxd_container:
     name: "node-{{ item }}"
     state: started
