@@ -1,0 +1,47 @@
+---
+- name: Configure nf_conntrack settings and create systemd service
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Set nf_conntrack max value in sysctl.conf
+      lineinfile:
+        path: /etc/sysctl.conf
+        line: "net.netfilter.nf_conntrack_max=131072"
+        state: present
+
+    - name: Apply sysctl changes
+      command: sysctl -p
+
+    - name: Ensure nf_conntrack module is loaded at boot
+      lineinfile:
+        path: /etc/modules
+        line: "nf_conntrack"
+        state: present
+
+    - name: Load nf_conntrack module immediately
+      command: modprobe nf_conntrack
+
+    - name: Create systemd service for nf_conntrack configuration
+      copy:
+        dest: /etc/systemd/system/nf_conntrack.service
+        content: |
+          [Unit]
+          Description=Configurer nf_conntrack et charger le module au démarrage
+
+          [Service]
+          ExecStart=/bin/bash -c "sysctl -w net.netfilter.nf_conntrack_max=131072 && modprobe nf_conntrack"
+          Type=oneshot
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon to recognize new service
+      command: systemctl daemon-reload
+
+    - name: Enable and start the nf_conntrack service at boot
+      systemd:
+        name: nf_conntrack.service
+        enabled: yes
+        state: started
+

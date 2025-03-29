@@ -1,0 +1,54 @@
+---
+# Fichier: delete_containers.yml
+# Description: Playbook pour supprimer des conteneurs LXD
+
+- name: Supprimer des conteneurs LXD
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    # Définir à 'all' pour supprimer tous les conteneurs ou spécifier un nom de conteneur
+    container_to_delete: "{{ container_name | default('all') }}"
+    # Force la suppression même si le conteneur est en cours d'exécution
+    force_delete: true
+  
+  tasks:
+    - name: Récupérer la liste de tous les conteneurs
+      shell: lxc list --format csv -c n
+      register: container_list
+      changed_when: false
+      when: container_to_delete == 'all'
+    
+    - name: Arrêter et supprimer tous les conteneurs
+      community.general.lxd_container:
+        name: "{{ item }}"
+        state: absent
+        force_stop: "{{ force_delete }}"
+      loop: "{{ container_list.stdout_lines | default([]) }}"
+      when: container_to_delete == 'all'
+      register: delete_all_result
+      ignore_errors: yes
+    
+    - name: Supprimer un conteneur spécifique
+      community.general.lxd_container:
+        name: "{{ container_to_delete }}"
+        state: absent
+        force_stop: "{{ force_delete }}"
+      when: container_to_delete != 'all'
+      register: delete_specific_result
+      ignore_errors: yes
+    
+    - name: Afficher le résultat de la suppression (tous les conteneurs)
+      debug:
+        msg: "Tous les conteneurs ont été supprimés: {{ delete_all_result.results | map(attribute='container_name') | list }}"
+      when: container_to_delete == 'all' and delete_all_result.results is defined
+
+    - name: Afficher le résultat de la suppression (conteneur spécifique)
+      debug:
+        msg: "Le conteneur '{{ container_to_delete }}' a été supprimé"
+      when: container_to_delete != 'all' and delete_specific_result.changed
+    
+    - name: Afficher un message si le conteneur spécifique n'existe pas
+      debug:
+        msg: "Le conteneur '{{ container_to_delete }}' n'existe pas ou n'a pas pu être supprimé"
+      when: container_to_delete != 'all' and not delete_specific_result.changed
