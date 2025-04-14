@@ -1,0 +1,24 @@
+---
+- name: Créer le profil pour les workers
+  community.general.lxd_profile:
+    name: "{{ k8s_cluster.workers.k8s_profile_name }}"
+    state: present
+    config: "{{ k8s_cluster.workers.profile_config }}"
+    devices: "{{ k8s_cluster.workers.devices }}"
+
+- name: Create worker
+  community.general.lxd_container:
+    name: "worker-{{ item }}"
+    state: started
+    source:
+      type: image
+      mode: pull
+      server: https://cloud-images.ubuntu.com/releases/
+      protocol: simplestreams
+      alias: "20.04"
+    profiles: ["{{ k8s_cluster.master.k8s_profile_name }}"]
+    wait_for_ipv4_addresses: true
+    timeout: 600
+  loop: "{{ range(1, node_count + 1) | list }}"
+  vars:
+    node_count: 2

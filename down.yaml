@@ -37,18 +37,3 @@
       when: container_to_delete != 'all'
       register: delete_specific_result
       ignore_errors: yes
-    
-    - name: Afficher le résultat de la suppression (tous les conteneurs)
-      debug:
-        msg: "Tous les conteneurs ont été supprimés: {{ delete_all_result.results | map(attribute='container_name') | list }}"
-      when: container_to_delete == 'all' and delete_all_result.results is defined
-
-    - name: Afficher le résultat de la suppression (conteneur spécifique)
-      debug:
-        msg: "Le conteneur '{{ container_to_delete }}' a été supprimé"
-      when: container_to_delete != 'all' and delete_specific_result.changed
-    
-    - name: Afficher un message si le conteneur spécifique n'existe pas
-      debug:
-        msg: "Le conteneur '{{ container_to_delete }}' n'existe pas ou n'a pas pu être supprimé"
-      when: container_to_delete != 'all' and not delete_specific_result.changed

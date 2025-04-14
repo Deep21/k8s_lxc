@@ -1,0 +1,15 @@
+---
+# - hosts: all    
+#   become: yes       
+#   roles:
+#     - role: lxc-k8s-setup
+
+- hosts: masters   # Exécute sur la machine locale où Ansible est installé.
+  become: yes        # Nécessite des privilèges root.
+  roles:
+    - role: lxc-k8s-setup   # Appelle le rôle créé.
+
+- hosts: workers    
+  become: yes       
+  roles:
+    - role: lxc-k8s-setup

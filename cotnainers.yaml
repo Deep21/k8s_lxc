@@ -3,4 +3,3 @@
   become: yes        # Nécessite des privilèges root.
   roles:
     - role: lxc-k8s-setup   # Appelle le rôle créé.
-

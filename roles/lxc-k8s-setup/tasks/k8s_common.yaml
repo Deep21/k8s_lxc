@@ -1,0 +1,118 @@
+---
+# Tâches communes pour tous les nœuds Kubernetes
+- name: Installation des paquets de base
+  apt:
+    name:
+      - net-tools
+      - curl
+      - vim
+      - ssh
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - openssh-server
+    state: present
+    update_cache: yes
+
+- name: Désactiver le swap
+  shell: swapoff -a
+  changed_when: false
+
+- name: Supprimer les entrées de swap dans fstab
+  lineinfile:
+    path: /etc/fstab
+    regexp: '^.*swap.*$'
+    state: absent
+
+- name: Créer le répertoire pour les clés GPG
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Télécharger la clé GPG de Docker
+  get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /tmp/docker.gpg
+
+- name: Ajouter la clé GPG de Docker
+  shell: cat /tmp/docker.gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  args:
+    creates: /etc/apt/keyrings/docker.gpg
+
+- name: Ajouter le dépôt Docker
+  shell: echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+  args:
+    creates: /etc/apt/sources.list.d/docker.list
+
+- name: Installer containerd
+  apt:
+    name: containerd.io
+    state: present
+    update_cache: yes
+
+- name: Créer le répertoire de configuration de containerd
+  file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+
+- name: Supprimer la configuration existante de containerd
+  file:
+    path: /etc/containerd/config.toml
+    state: absent
+
+- name: Générer la configuration par défaut de containerd
+  shell: containerd config default > /etc/containerd/config.toml
+
+- name: Configurer SystemdCgroup pour containerd
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+
+- name: Redémarrer et activer containerd
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+
+- name: Télécharger la clé GPG de Kubernetes
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+    dest: /tmp/kubernetes.gpg
+
+- name: Ajouter la clé GPG de Kubernetes
+  shell: cat /tmp/kubernetes.gpg | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Ajouter le dépôt Kubernetes
+  shell: echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+  args:
+    creates: /etc/apt/sources.list.d/kubernetes.list
+
+- name: Installer Kubernetes
+  apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    update_cache: yes
+
+- name: Redémarrer kubelet
+  systemd:
+    name: kubelet
+    state: restarted
+
+- name: Marquer les paquets Kubernetes pour éviter les mises à jour automatiques
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
