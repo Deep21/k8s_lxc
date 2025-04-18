@@ -5,7 +5,7 @@
   register: k8s_config_exists
 
 - name: Initialiser le cluster Kubernetes
-  shell: kubeadm init --pod-network-cidr=10.244.0.0/16 --ignore-preflight-errors=all
+  shell: kubeadm init --pod-network-cidr=192.168.0.0/16 --ignore-preflight-errors=all
   args:
     creates: /etc/kubernetes/admin.conf
   register: kubeadm_init
@@ -43,16 +43,16 @@
     mode: '0600'
   when: kubeadm_init.changed
 
-- name: Télécharger le manifeste kube-flannel
+- name: Télécharger le manifeste Calico
   get_url:
-    url: https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-    dest: /home/ubuntu/kube-flannel.yml
+    url: https://docs.projectcalico.org/manifests/calico.yaml
+    dest: /home/ubuntu/calico.yaml
     owner: ubuntu
     group: ubuntu
     mode: '0644'
 
-- name: Appliquer le manifeste kube-flannel
-  shell: kubectl apply -f /home/ubuntu/kube-flannel.yml
+- name: Appliquer le manifeste Calico
+  shell: kubectl apply -f /home/ubuntu/calico.yaml
   become_user: ubuntu
   environment:
     KUBECONFIG: /home/ubuntu/.kube/config
@@ -83,10 +83,10 @@
   changed_when: false
   ignore_errors: true
 
-- name: Attendre que les pods Flannel soient prêts
-  shell: kubectl get pods -n kube-flannel -l app=flannel -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
-  register: flannel_ready
-  until: flannel_ready.rc == 0
+- name: Attendre que les pods Calico soient prêts
+  shell: kubectl get pods -n kube-system -l k8s-app=calico-node -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
+  register: calico_ready
+  until: calico_ready.rc == 0
   retries: 30
   delay: 10
   become_user: ubuntu

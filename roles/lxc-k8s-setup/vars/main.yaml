@@ -51,7 +51,9 @@ k8s_cluster:
         path: /dev/kmsg
         source: /dev/kmsg
         type: unix-char
-
+      tun:
+        path: /dev/net/tun
+        type: unix-char
   # Configuration pour les workers
   workers:
     k8s_profile_name: "worker-profile"
@@ -93,7 +95,9 @@ k8s_cluster:
         pool: lxd-storage
         size: 15GB
         type: disk
-
+      tun:
+        path: /dev/net/tun
+        type: unix-char
 # Paramètres généraux
 k8s_version: "1.26.1-00"
 pod_network_cidr: "10.244.0.0/16"

@@ -1,5 +1,4 @@
 ---
-# Tâches communes pour tous les nœuds Kubernetes
 - name: Installation des paquets de base
   apt:
     name:
