@@ -1,0 +1,8 @@
+---
+# defaults/main.yaml for kubernetes-common
+k8s_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+
+k8s_version: "1.24.0"
