@@ -1,0 +1,118 @@
+---
+# Variables pour le réseau LXD
+ipv6_address: none
+network_name: "lxdbr0"
+ipv4_address: "10.0.8.1/24"
+ipv4_nat: "true"
+ssh_key_path: "~/.ssh/k8s_lxd_key"
+
+k8s_cluster:
+  master:
+    k8s_profile_name: "master-profile"
+    name: "k8s-master"
+    profile_config:
+      limits.cpu: "2"
+      limits.memory: 3GB
+      limits.memory.swap: "false"
+      linux.kernel_modules: ip_tables,ip6_tables,nf_nat,overlay,br_netfilter
+      raw.lxc: |
+        lxc.apparmor.profile=unconfined
+        lxc.cap.drop=
+        lxc.cgroup.devices.allow=a
+        lxc.mount.auto=proc:rw sys:rw cgroup:rw
+      security.nesting: "true"
+      security.privileged: "true"
+      user.user-data: |
+        #cloud-config
+        ssh_authorized_keys:
+          - {{ ssh_public_key }}
+        runcmd:
+          - systemctl enable ssh
+          - systemctl start ssh
+    role: "master"
+
+    devices:
+      eth0:
+        name: eth0
+        nictype: bridged
+        parent: kube0
+        type: nic
+      root:
+        path: /
+        pool: lxd-storage
+        size: 20GB
+        type: disk
+      kmsg:
+        path: /dev/kmsg
+        source: /dev/kmsg
+        type: unix-char
+      tun:
+        path: /dev/net/tun
+        type: unix-char
+        
+  # Configuration pour les workers
+  workers:
+    k8s_profile_name: "worker-profile"
+    count: 1 # Nombre de workers à déployer
+    prefix: "k8s-worker"  # Préfixe pour nommer les workers
+    profile_config:
+      limits.cpu: "1"
+      limits.memory: 2GB
+      limits.memory.swap: "false"
+      linux.kernel_modules: ip_tables,ip6_tables,nf_nat,overlay,br_netfilter
+      raw.lxc: |
+        lxc.apparmor.profile=unconfined
+        lxc.cap.drop=
+        lxc.cgroup.devices.allow=a
+        lxc.mount.auto=proc:rw sys:rw cgroup:rw
+      security.nesting: "true"
+      security.privileged: "true"
+      # Configuration cloud-init pour SSH
+      user.user-data: |
+        #cloud-config
+        ssh_authorized_keys:
+          - {{ ssh_public_key }}
+        packages:
+          - openssh-server
+        runcmd:
+          - apt-get update -y
+          - systemctl enable ssh
+          - systemctl start ssh
+    role: "worker"
+    # Définition des devices
+    devices:
+      eth0:
+        name: eth0
+        nictype: bridged
+        parent: kube0
+        type: nic
+      root:
+        path: /
+        pool: lxd-storage
+        size: 15GB
+        type: disk
+      tun:
+        path: /dev/net/tun
+        type: unix-char
+# Paramètres généraux
+k8s_version: "1.26.1-00"
+pod_network_cidr: "10.244.0.0/16"
+      
+k8s_profile_devices:
+  eth0:
+    name: eth0
+    nictype: bridged
+    parent: kube0
+    type: nic
+  kmsg:
+    path: /dev/kmsg
+    source: /dev/kmsg
+    type: unix-char
+  root:
+    path: /
+    pool: lxd-storage
+    type: disk
+
+pool_name: "zfspool"
+disk_device: "/dev/sdb"
+loop_size: "20GB"

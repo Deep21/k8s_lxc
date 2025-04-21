@@ -1,0 +1,4 @@
+---
+- include_tasks: lxc.yaml
+- include_tasks: master.yaml
+- include_tasks: worker.yaml

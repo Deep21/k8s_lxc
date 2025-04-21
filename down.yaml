@@ -1,15 +1,10 @@
 ---
-# Fichier: delete_containers.yml
-# Description: Playbook pour supprimer des conteneurs LXD
-
 - name: Supprimer des conteneurs LXD
   hosts: localhost
   connection: local
   gather_facts: no
   vars:
-    # Définir à 'all' pour supprimer tous les conteneurs ou spécifier un nom de conteneur
     container_to_delete: "{{ container_name | default('all') }}"
-    # Force la suppression même si le conteneur est en cours d'exécution
     force_delete: true
   
   tasks:
