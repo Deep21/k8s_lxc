@@ -1,0 +1,6 @@
+---
+manifest_file: ./manifest.yaml
+lxd_image_alias: "22.04"
+cluster_name: "cluster"
+k8s_worker_node_count: 1
+k8s_master_node_count: 1

@@ -66,7 +66,7 @@
 - name: Créer clé RSA
   community.crypto.openssh_keypair:
     path: /root/.ssh/k8s_lxd_key
-    type: ed25519  # Recommandé pour la sécurité
+    type: ed25519
     state: present
   when: not ssh_key_file.stat.exists
   

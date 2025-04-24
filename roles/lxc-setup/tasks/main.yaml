@@ -1,4 +1,11 @@
 ---
 - include_tasks: lxc.yaml
-- include_tasks: master.yaml
-- include_tasks: worker.yaml
+  when: ansible_os_family == "Debian"
+
+- include_tasks: profiles.yaml
+  when: 
+   - ansible_os_family == "Debian"
+
+- include_tasks: nodes.yaml
+  when: 
+   - ansible_os_family == "Debian"

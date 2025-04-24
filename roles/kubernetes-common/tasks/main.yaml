@@ -2,18 +2,15 @@
 - name: Installation des paquets de base
   apt:
     name:
-      - net-tools
-      - curl
-      - vim
-      - ssh
-      - software-properties-common
       - apt-transport-https
       - ca-certificates
-      - gnupg
-      - lsb-release
-      - openssh-server
+      - curl
+      - gnupg-agent
+      - software-properties-common
     state: present
     update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
 
 - name: Désactiver le swap
   shell: swapoff -a
