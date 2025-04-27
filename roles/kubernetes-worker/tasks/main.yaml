@@ -1,2 +1,4 @@
 ---
-- include_tasks: join.yaml
+- name: Inclure des tâches conditionnellement
+  include_tasks: join.yaml
+  when: inventory_hostname is regex('^.*-worker-1$') and inventory_hostname.split('-')[0] == cluster_name

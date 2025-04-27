@@ -1,16 +1,44 @@
 ---
-
-- hosts: all 
+- name: Installer les packages pour kube
+  hosts: all
   become: yes 
   roles:
     - role: kubernetes-common
 
-- hosts: masters
+- name: Installer Kubernetes
+  hosts: masters
   become: yes       
   roles:
     - role: kubernetes-master
 
-- hosts: workers    
+- name: Joindre le worker
+  hosts: workers
   become: yes       
   roles:
     - role: kubernetes-worker
+
+- name: Mettre à jour les manifests comme provisionnés
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Récupérer les noms de clusters uniques
+      set_fact:
+        cluster_names: "{{ groups['all'] | map('regex_replace', '^(.*?)-.*$', '\\1') | unique }}"
+
+    - name: Mettre à jour les fichiers manifest
+      block:
+        - name: Lire le contenu du manifest
+          slurp:
+            src: "./data/manifest-{{ item }}.yaml"
+          register: manifest_content
+          ignore_errors: yes
+          loop: "{{ cluster_names }}"
+
+        - name: Mettre à jour le manifest avec provisioned
+          copy:
+            dest: "./data/manifest-{{ item.item }}.yaml"
+            content: "{{ (item.content | b64decode | from_yaml | combine({'metadata': (item.content | b64decode | from_yaml).metadata | combine({'provisioned': 'true'})}, recursive=true)) | to_yaml }}"
+          when: item.failed is not defined
+          loop: "{{ manifest_content.results }}"
+          loop_control:
+            label: "{{ item.item }}"

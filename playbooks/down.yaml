@@ -32,3 +32,9 @@
       when: container_to_delete != 'all'
       register: delete_specific_result
       ignore_errors: yes
+
+    # - name: Supprimer le fichier manifest correspondant
+    #   ansible.builtin.file:
+    #     path: "./data/manifest-{{ container_to_delete.split('-') }}.yaml"
+    #     state: absent
+    #     when: container_to_delete != 'all' and delete_specific_result is not failed

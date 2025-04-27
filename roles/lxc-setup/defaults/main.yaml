@@ -1,6 +1,5 @@
 ---
-manifest_file: ./manifest.yaml
-lxd_image_alias: "22.04"
-cluster_name: "cluster"
+cluster_names: ["default"]  # Valeur par défaut si aucun cluster n'est spécifié
+lxd_image_alias: "22.04" 
 k8s_worker_node_count: 1
 k8s_master_node_count: 1

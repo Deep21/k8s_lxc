@@ -9,7 +9,7 @@ import sys
 # Chemin vers la clé SSH privée
 SSH_KEY_PATH = "/root/.ssh/k8s_lxd_key"
 # Chemin vers le fichier manifest
-MANIFEST_PATH = "./manifest-peter.yaml"
+MANIFEST_PATH = "./data/manifest-test2.yaml"
 
 def read_manifest():
     """Lit le fichier manifest YAML et extrait le nom du cluster"""
@@ -58,8 +58,9 @@ def get_lxc_containers():
         
         # Groupes principaux
         inventory["all"] = {"children": ["masters", "workers"]}
-        inventory["masters"] = {"hosts": {}}
-        inventory["workers"] = {"hosts": {}}
+        inventory["masters"] = {"hosts": []}
+        inventory["workers"] = {"hosts": []}
+        
         
         # Parcourt chaque conteneur pour extraire les informations nécessaires
         for container in containers:
@@ -81,9 +82,9 @@ def get_lxc_containers():
                 if ip_address:
                     # Classification master/worker par nom
                     if f"{cluster_name}-master" in name:
-                        inventory["masters"]["hosts"][name] = {}
+                        inventory["masters"]["hosts"].append(name)
                     elif f"{cluster_name}-worker" in name:
-                        inventory["workers"]["hosts"][name] = {}
+                        inventory["workers"]["hosts"].append(name)
                     
                     # Configuration SSH
                     inventory["_meta"]["hostvars"][name] = {

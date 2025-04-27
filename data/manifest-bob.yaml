@@ -2,19 +2,20 @@
 # K8s Cluster Manifest
 
 metadata:
-  cluster_name: "peter"
-  created_at: "2025-04-24T13:00:00Z"
+  cluster_name: "bob"
+  created_at: "2025-04-26T00:15:23Z"
   master_count: 1
   worker_count: 1
   lxd_image: "22.04"
   creator: "root"
-
+  provisioned: no
+  
 nodes:
   masters:
-    - name: "peter-master-1"
+    - name: "bob-master-1"
       status: "Running"
-      ip: "10.0.1.111"
+      ip: "10.0.1.12"
   workers:
-    - name: "peter-worker-1"
+    - name: "bob-worker-1"
       status: "Running"
-      ip: "10.0.1.183"
+      ip: "10.0.1.136"

@@ -1,7 +1,81 @@
+# ---
+# - name: Create master
+#   community.general.lxd_container:
+#     name: "{{ cluster_name }}-master-{{ item }}"
+#     state: started
+#     source:
+#       type: image
+#       mode: pull
+#       server: https://cloud-images.ubuntu.com/releases/
+#       protocol: simplestreams
+#       alias: "{{ lxd_image_alias }}"
+#     profiles: ["{{ k8s_cluster.master.k8s_profile_name }}"]
+#     wait_for_ipv4_addresses: true
+#     timeout: 600
+#   loop: "{{ range(1, k8s_master_node_count + 1) | list }}"
+#   when: k8s_master_node_count > 0
+
+# - name: Create worker
+#   community.general.lxd_container:
+#     name: "{{ cluster_name }}-worker-{{ item }}"
+#     state: started
+#     source:
+#       type: image
+#       mode: pull
+#       server: https://cloud-images.ubuntu.com/releases/
+#       protocol: simplestreams
+#       alias: "{{ lxd_image_alias }}"
+#     profiles: ["{{ k8s_cluster.master.k8s_profile_name }}"]
+#     wait_for_ipv4_addresses: true
+#     timeout: 600
+#   loop: "{{ range(1, k8s_worker_node_count + 1) | list }}"
+#   when: k8s_worker_node_count > 0
+
+# - name: Get list of LXD containers filtered by cluster name
+#   ansible.builtin.shell: |
+#     lxc list "{{ cluster_name }}-" --format json
+#   register: lxc_list_output
+#   changed_when: false
+
+# - name: Parse LXD container information
+#   ansible.builtin.set_fact:
+#     lxc_containers: "{{ lxc_list_output.stdout | from_json }}"
+
+# - name: Generate cluster manifest file
+#   ansible.builtin.copy:
+#     content: |
+#       ---
+#       # K8s Cluster Manifest
+      
+#       metadata:
+#         cluster_name: "{{ cluster_name }}"
+#         created_at: "{{ ansible_date_time.iso8601 }}"
+#         master_count: {{ k8s_master_node_count }}
+#         worker_count: {{ k8s_worker_node_count }}
+#         lxd_image: "{{ lxd_image_alias }}"
+#         creator: "{{ lookup('env', 'USER') }}"
+#         provisioned: no
+        
+#       nodes:
+#         masters:
+#       {% for container in lxc_containers | selectattr('name', 'match', cluster_name + '-master-') | list %}
+#           - name: "{{ container.name }}"
+#             status: "{{ container.status }}"
+#             ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+#       {% endfor %}
+#         workers:
+#       {% for container in lxc_containers | selectattr('name', 'match', cluster_name + '-worker-') | list %}
+#           - name: "{{ container.name }}"
+#             status: "{{ container.status }}"
+#             ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+#       {% endfor %}
+#     dest: "../data/manifest-{{ cluster_name }}.yaml"
+#     mode: '0644'
+
 ---
-- name: Create master
+- name: Create master nodes for each cluster
   community.general.lxd_container:
-    name: "{{ cluster_name }}-master-{{ item }}"
+    name: "{{ item[0] }}-master-{{ item[1] }}"
     state: started
     source:
       type: image
@@ -12,12 +86,14 @@
     profiles: ["{{ k8s_cluster.master.k8s_profile_name }}"]
     wait_for_ipv4_addresses: true
     timeout: 600
-  loop: "{{ range(1, k8s_master_node_count + 1) | list }}"
+  with_nested:
+    - "{{ cluster_names }}"
+    - "{{ range(1, k8s_master_node_count + 1) | list }}"
   when: k8s_master_node_count > 0
 
-- name: Create worker
+- name: Create worker nodes for each cluster
   community.general.lxd_container:
-    name: "{{ cluster_name }}-worker-{{ item }}"
+    name: "{{ item[0] }}-worker-{{ item[1] }}"
     state: started
     source:
       type: image
@@ -28,45 +104,92 @@
     profiles: ["{{ k8s_cluster.master.k8s_profile_name }}"]
     wait_for_ipv4_addresses: true
     timeout: 600
-  loop: "{{ range(1, k8s_worker_node_count + 1) | list }}"
+  with_nested:
+    - "{{ cluster_names }}"
+    - "{{ range(1, k8s_worker_node_count + 1) | list }}"
   when: k8s_worker_node_count > 0
 
-- name: Get list of LXD containers filtered by cluster name
-  ansible.builtin.shell: |
-    lxc list "{{ cluster_name }}-" --format json
-  register: lxc_list_output
-  changed_when: false
-
-- name: Parse LXD container information
-  ansible.builtin.set_fact:
-    lxc_containers: "{{ lxc_list_output.stdout | from_json }}"
-
-- name: Generate cluster manifest file
-  ansible.builtin.copy:
-    content: |
-      ---
-      # K8s Cluster Manifest
+- name: Generate manifests for each cluster
+  block:
+    - name: Get list of LXD containers filtered by cluster name
+      ansible.builtin.shell: |
+        lxc list "{{ item }}-" --format json
+      register: lxc_list_output
+      changed_when: false
+      loop: "{{ cluster_names }}"
       
-      metadata:
-        cluster_name: "{{ cluster_name }}"
-        created_at: "{{ ansible_date_time.iso8601 }}"
-        master_count: {{ k8s_master_node_count }}
-        worker_count: {{ k8s_worker_node_count }}
-        lxd_image: "{{ lxd_image_alias }}"
-        creator: "{{ lookup('env', 'USER') }}"
+    - name: Generate cluster manifest files
+      ansible.builtin.copy:
+        content: |
+          ---
+          # K8s Cluster Manifest
+          
+          metadata:
+            cluster_name: "{{ item.item }}"
+            created_at: "{{ ansible_date_time.iso8601 }}"
+            master_count: {{ k8s_master_node_count }}
+            worker_count: {{ k8s_worker_node_count }}
+            lxd_image: "{{ lxd_image_alias }}"
+            creator: "{{ lookup('env', 'USER') }}"
+            provisioned: no
+            
+          nodes:
+            masters:
+          {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-master-') | list %}
+              - name: "{{ container.name }}"
+                status: "{{ container.status }}"
+                ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+          {% endfor %}
+            workers:
+          {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-worker-') | list %}
+              - name: "{{ container.name }}"
+                status: "{{ container.status }}"
+                ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+          {% endfor %}
+        dest: "../data/manifest-{{ item.item }}.yaml"
+        mode: '0644'
+      loop: "{{ lxc_list_output.results }}"
+      loop_control:
+        label: "manifest-{{ item.item }}.yaml"
+
+
+# - name: Get list of LXD containers filtered by cluster name
+#   ansible.builtin.shell: |
+#     lxc list "{{ current_cluster }}-" --format json
+#   register: lxc_list_output
+#   changed_when: false
+
+# - name: Parse LXD container information
+#   ansible.builtin.set_fact:
+#     lxc_containers: "{{ lxc_list_output.stdout | from_json }}"
+
+# - name: Generate cluster manifest file
+#   ansible.builtin.copy:
+#     content: |
+#       ---
+#       # K8s Cluster Manifest
       
-      nodes:
-        masters:
-      {% for container in lxc_containers | selectattr('name', 'match', cluster_name + '-master-') | list %}
-          - name: "{{ container.name }}"
-            status: "{{ container.status }}"
-            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
-      {% endfor %}
-        workers:
-      {% for container in lxc_containers | selectattr('name', 'match', cluster_name + '-worker-') | list %}
-          - name: "{{ container.name }}"
-            status: "{{ container.status }}"
-            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
-      {% endfor %}
-    dest: "./manifest-{{ cluster_name }}"
-    mode: '0644'
+#       metadata:
+#         cluster_name: "{{ current_cluster }}"
+#         created_at: "{{ ansible_date_time.iso8601 }}"
+#         master_count: {{ k8s_master_node_count }}
+#         worker_count: {{ k8s_worker_node_count }}
+#         lxd_image: "{{ lxd_image_alias }}"
+#         creator: "{{ lookup('env', 'USER') }}"
+#         provisioned: no
+        
+#       nodes:
+#         masters:
+#       {% for container in lxc_containers | selectattr('name', 'match', current_cluster + '-master-') | list %}
+#           - name: "{{ container.name }}"
+#             status: "{{ container.status }}"
+#             ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+#       {% endfor %}
+#         workers:
+#       {% for container in lxc_containers | selectattr('name', 'match', current_cluster + '-worker-') | list %}
+#           - name: "{{ container.name }}"
+#             status: "{{ container.status }}"
+#             ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+#       {% endfor %}
+#     dest: "../data/manifest-{{ current_cluster }}.yaml"
+#     mode: '0644'

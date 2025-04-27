@@ -1,0 +1,9 @@
+---
+# Contenu de test.yaml
+- name: Afficher le nom du cluster
+  debug:
+    msg: "Le nom du cluster est {{ cluster_name }}"
+
+- name: Autre tâche
+  debug:
+    msg: "Ceci est une autre tâche dans le fichier inclus"

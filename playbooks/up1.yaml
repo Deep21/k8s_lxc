@@ -1,0 +1,7 @@
+---
+- name: Exemple d'affichage d'une variable d'hôte
+  hosts: all
+  tasks:
+    - name: Inclure des tâches conditionnellement
+      include_tasks: test.yaml
+      when: inventory_hostname is regex('^.*-worker-1$') and inventory_hostname.split('-')[0] == cluster_name
