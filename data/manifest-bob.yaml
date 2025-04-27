@@ -2,20 +2,21 @@
 # K8s Cluster Manifest
 
 metadata:
-  cluster_name: "bob"
-  created_at: "2025-04-26T00:15:23Z"
+  cluster_name: "bob" # item.item est le nom du cluster (de la boucle précédente)
+  created_at: "2025-04-27T22:37:37Z"
   master_count: 1
   worker_count: 1
   lxd_image: "22.04"
   creator: "root"
-  provisioned: no
-  
+  provisioned: false # Utiliser un booléen
+
 nodes:
   masters:
-    - name: "bob-master-1"
-      status: "Running"
-      ip: "10.0.1.12"
+          - ip: 10.0.1.85
+        name: bob-master-1
+        status: Running
+
   workers:
-    - name: "bob-worker-1"
-      status: "Running"
-      ip: "10.0.1.136"
+          - ip: 10.0.1.88
+        name: bob-worker-1
+        status: Running

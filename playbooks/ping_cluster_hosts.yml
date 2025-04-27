@@ -1,0 +1,19 @@
+---
+- name: Récupérer tous les hôtes du cluster {{ current_cluster }}
+  set_fact:
+    cluster_hosts: "{{ groups[current_cluster + '_masters'] | default([]) + groups[current_cluster + '_workers'] | default([]) }}"
+
+- name: Afficher les hôtes du cluster {{ current_cluster }}
+  debug:
+    msg: "Hôtes du cluster {{ current_cluster }}: {{ cluster_hosts }}"
+
+- name: Ping des hôtes du cluster {{ current_cluster }}
+  command: ping -c 1 {{ hostvars[item]['ansible_host'] }}
+  register: ping_result
+  loop: "{{ cluster_hosts }}"
+  ignore_errors: yes
+
+- name: Afficher les résultats du ping pour le cluster {{ current_cluster }}
+  debug:
+    msg: "Ping de {{ item.item }} ({{ hostvars[item.item]['ansible_host'] }}): {{ 'Succès' if item.rc == 0 else 'Échec' }}"
+  loop: "{{ ping_result.results }}"

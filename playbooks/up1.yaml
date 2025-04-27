@@ -1,7 +1,57 @@
 ---
-- name: Exemple d'affichage d'une variable d'hôte
-  hosts: all
+- name: Préparer les clusters cibles et créer le groupe dynamique
+  hosts: localhost
+  gather_facts: no
   tasks:
-    - name: Inclure des tâches conditionnellement
-      include_tasks: test.yaml
-      when: inventory_hostname is regex('^.*-worker-1$') and inventory_hostname.split('-')[0] == cluster_name
+    - name: Convertir la chaîne de clusters en liste
+      ansible.builtin.set_fact:
+        target_clusters: "{{ target_cluster.split(';') | map('trim') | list }}"
+      when: target_cluster is defined and target_cluster != 'all'
+
+    - name: Définir tous les clusters comme cibles si 'all' est spécifié
+      ansible.builtin.set_fact:
+        target_clusters: "{{ groups.keys() | select('match', '^((?!masters$|workers$|all$|ungrouped$).)') | list }}"
+      when: target_cluster is not defined or target_cluster == 'all'
+
+    - name: Afficher les clusters cibles
+      ansible.builtin.debug:
+        msg: "Clusters cibles: {{ target_clusters }}"
+
+    # Inclure un fichier de tâches pour ajouter les hôtes de chaque cluster
+    - name: Ajouter les hôtes pour chaque cluster cible au groupe 'target_hosts'
+      ansible.builtin.include_tasks: add_hosts_to_group.yml  # Fichier à créer
+      loop: "{{ target_clusters }}"
+      loop_control:
+        loop_var: current_cluster # La variable 'current_cluster' sera disponible dans le fichier inclus
+
+    - name: Afficher les hôtes cibles pour le ping
+      ansible.builtin.debug:
+        msg: "Le rôle de ping ciblera les hôtes: {{ groups['target_hosts'] | default([]) }}"
+      when: groups['target_hosts'] is defined
+
+# Play qui exécute le rôle sur les hôtes ciblés
+- name: Exécuter le ping via le rôle sur les hôtes cibles
+  hosts: target_hosts  # Cible le groupe dynamique créé précédemment
+  gather_facts: yes
+  become: yes 
+  roles:
+    - role: kubernetes-common
+
+- name: Installer Kubernetes
+  hosts: target_hosts
+  become: yes       
+  roles:
+    - role: kubernetes-master
+
+- name: Joindre le worker
+  hosts: target_hosts
+  become: yes       
+  roles:
+    - role: kubernetes-worker
+
+# Nouveau Play qui cible les hôtes préparés et applique le rôle
+- name: Exécuter le ping via le rôle sur les hôtes cibles
+  hosts: target_hosts  # Cible le groupe dynamique créé précédemment
+  gather_facts: no     # Pas besoin de facts pour un simple ping
+  roles:
+    - role: ping # Applique le rôle créé
