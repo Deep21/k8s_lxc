@@ -1,6 +1,8 @@
 ---
 - name: Préparer les clusters cibles et créer le groupe dynamique
   hosts: localhost
+  order: sorted
+  serial: 1 # Exécute sur UN seul hôte à la fois
   gather_facts: no
   tasks:
     - name: Convertir la chaîne de clusters en liste
@@ -29,7 +31,7 @@
         msg: "Le rôle de ping ciblera les hôtes: {{ groups['target_hosts'] | default([]) }}"
       when: groups['target_hosts'] is defined
 
-# Play qui exécute le rôle sur les hôtes ciblés
+# # Play qui exécute le rôle sur les hôtes ciblés
 - name: Exécuter le ping via le rôle sur les hôtes cibles
   hosts: target_hosts  # Cible le groupe dynamique créé précédemment
   gather_facts: yes
@@ -45,13 +47,6 @@
 
 - name: Joindre le worker
   hosts: target_hosts
-  become: yes       
+  become: yes
   roles:
     - role: kubernetes-worker
-
-# Nouveau Play qui cible les hôtes préparés et applique le rôle
-- name: Exécuter le ping via le rôle sur les hôtes cibles
-  hosts: target_hosts  # Cible le groupe dynamique créé précédemment
-  gather_facts: no     # Pas besoin de facts pour un simple ping
-  roles:
-    - role: ping # Applique le rôle créé

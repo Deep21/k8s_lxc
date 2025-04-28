@@ -47,47 +47,35 @@
   loop_control:
     label: "{{ item }}"
 
-- name: Générer les fichiers manifest pour chaque cluster
+- name: Generate cluster manifest files
   ansible.builtin.copy:
     content: |
       ---
       # K8s Cluster Manifest
-
+      
       metadata:
-        cluster_name: "{{ item.item }}" # item.item est le nom du cluster (de la boucle précédente)
+        cluster_name: "{{ item.item }}"
         created_at: "{{ ansible_date_time.iso8601 }}"
-        master_count: {{ k8s_master_node_count | int }}
-        worker_count: {{ k8s_worker_node_count | int }}
-        lxd_image: "{{ lxd_image_alias | default('ubuntu/jammy') }}"
-        creator: "{{ lookup('env', 'USER') | default('ansible') }}"
-        provisioned: false # Utiliser un booléen
-
+        master_count: {{ k8s_master_node_count }}
+        worker_count: {{ k8s_worker_node_count }}
+        lxd_image: "{{ lxd_image_alias }}"
+        creator: "{{ lookup('env', 'USER') }}"
+        provisioned: no
+        
       nodes:
         masters:
-      {% set masters = [] %}
-      {% for container in (item.stdout | from_json) if item.stdout and item.stdout.strip() != "" and item.stdout.strip() != "null" %}
-        {% if item.item + '-master-' in container.name %}
-          {% set _ = masters.append({
-              'name': container.name,
-              'status': container.status,
-              'ip': container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('')
-          }) %}
-        {% endif %}
+      {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-master-') | list %}
+          - name: "{{ container.name }}"
+            status: "{{ container.status }}"
+            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
       {% endfor %}
-      {{ masters | to_nice_yaml(indent=2) | indent(6) }}
         workers:
-      {% set workers = [] %}
-      {% for container in (item.stdout | from_json) if item.stdout and item.stdout.strip() != "" and item.stdout.strip() != "null" %}
-        {% if item.item + '-worker-' in container.name %}
-          {% set _ = workers.append({
-              'name': container.name,
-              'status': container.status,
-              'ip': container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('')
-          }) %}
-        {% endif %}
+      {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-worker-') | list %}
+          - name: "{{ container.name }}"
+            status: "{{ container.status }}"
+            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
       {% endfor %}
-      {{ workers | to_nice_yaml(indent=2) | indent(6) }}
-    dest: "../data/manifest-{{ item.item }}.yaml" # Assurez-vous que ce chemin est correct
+    dest: "../data/manifest-{{ item.item }}.yaml"
     mode: '0644'
   loop: "{{ lxc_list_output.results }}"
   loop_control:

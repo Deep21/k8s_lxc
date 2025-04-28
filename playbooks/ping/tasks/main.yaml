@@ -1,9 +1,0 @@
-# roles/ping_cluster/tasks/main.yml
----
-- name: Lister les fichiers dans le répertoire home
-  ansible.builtin.command: ls -lah ~
-  register: ls_output
-
-- name: Afficher le résultat de ls -lah
-  ansible.builtin.debug:
-    var: ls_output.stdout_lines
