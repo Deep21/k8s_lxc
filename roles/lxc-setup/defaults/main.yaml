@@ -3,3 +3,111 @@ cluster_names: ["default"]  # Valeur par défaut si aucun cluster n'est spécifi
 lxd_image_alias: "22.04" 
 k8s_worker_node_count: 1
 k8s_master_node_count: 1
+
+pool_name: "zfspool"
+network_name: "lxdbr0"
+ipv4_address: "10.0.8.1/24"
+ipv4_nat: "true"
+ssh_key_path: "~/.ssh/k8s_lxd_key"
+loop_size: "20GB"
+
+k8s_profile_devices:
+  eth0:
+    name: eth0
+    nictype: bridged
+    parent: kube0
+    type: nic
+  kmsg:
+    path: /dev/kmsg
+    source: /dev/kmsg
+    type: unix-char
+  root:
+    path: /
+    pool: "{{ pool_name }}"
+    type: disk
+
+k8s_cluster:
+  master:
+    k8s_profile_name: "master-profile"
+    name: "k8s-master"
+    profile_config:
+      limits.cpu: "2"
+      limits.memory: 2GB
+      limits.memory.swap: "false"
+      linux.kernel_modules: ip_tables,ip6_tables,nf_nat,overlay,br_netfilter
+      raw.lxc: |
+        lxc.apparmor.profile=unconfined
+        lxc.cap.drop=
+        lxc.cgroup.devices.allow=a
+        lxc.mount.auto=proc:rw sys:rw cgroup:rw
+      security.nesting: "true"
+      security.privileged: "true"
+      user.user-data: |
+        #cloud-config
+        ssh_authorized_keys:
+          - "{{ ssh_public_key }}"
+        runcmd:
+          - systemctl enable ssh
+          - systemctl start ssh
+    role: "master"
+    devices:
+      eth0:
+        name: eth0
+        nictype: bridged
+        parent: "{{ network_name }}"
+        type: nic
+      root:
+        path: /
+        pool: "{{ pool_name }}"
+        size: "{{ loop_size }}"
+        type: disk
+      kmsg:
+        path: /dev/kmsg
+        source: /dev/kmsg
+        type: unix-char
+      tun:
+        path: /dev/net/tun
+        type: unix-char
+  workers:
+    k8s_profile_name: "worker-profile"
+    count: 1 
+    prefix: "k8s-worker" 
+    profile_config:
+      limits.cpu: "2"
+      limits.memory: 2GB
+      limits.memory.swap: "false"
+      linux.kernel_modules: ip_tables,ip6_tables,nf_nat,overlay,br_netfilter
+      raw.lxc: |
+        lxc.apparmor.profile=unconfined
+        lxc.cap.drop=
+        lxc.cgroup.devices.allow=a
+        lxc.mount.auto=proc:rw sys:rw cgroup:rw
+      security.nesting: "true"
+      security.privileged: "true"
+      user.user-data: |
+        #cloud-config
+        ssh_authorized_keys:
+          - "{{ ssh_public_key }}"
+        packages:
+          - openssh-server
+        runcmd:
+          - apt-get update -y
+          - systemctl enable ssh
+          - systemctl start ssh
+    role: "worker"
+    devices:
+      eth0:
+        name: eth0
+        nictype: bridged
+        parent: "{{ network_name }}"
+        type: nic
+      root:
+        path: /
+        pool: "{{ pool_name }}"
+        size: "{{ loop_size }}"
+        type: disk
+      tun:
+        path: /dev/net/tun
+        type: unix-char
+
+

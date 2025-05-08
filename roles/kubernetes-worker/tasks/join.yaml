@@ -1,24 +1,4 @@
-# ---
-# - name: Display global fact
-#   ansible.builtin.debug:
-#     msg: "Global value is: {{ hostvars[groups['masters'][0]]['kubernetes_join_command'] }}"
-#   when: hostvars[groups['masters'][0]]['kubernetes_join_command'] is defined
-
-# - name: Joindre les workers au cluster
-#   command: "{{ hostvars[groups['masters'][0]]['kubernetes_join_command'] }}"
-#   when: 
-#     - inventory_hostname in groups['workers']
-#   register: join_result
-  
-# - name: Afficher le résultat de la jointure
-#   debug:
-#     var: join_result
-#   when: inventory_hostname in groups['workers']
-
 ---
-# ... (tâches précédentes, y compris celle qui définit 'kubernetes_join_command' sur chaque master) ...
-
-# Optionnel: Afficher la commande de jointure spécifique au cluster du worker
 - name: Afficher la commande de jointure pour ce worker
   ansible.builtin.debug:
     # Utilise le cluster_name du worker pour trouver le premier master de ce cluster spécifique
@@ -30,22 +10,30 @@
     - groups[cluster_name + '_masters'] is defined and groups[cluster_name + '_masters'] | length > 0 # Vérifie que le groupe master existe et n'est pas vide
     - hostvars[groups[cluster_name + '_masters'][0]]['kubernetes_join_command'] is defined # Vérifie que la commande existe pour ce master
 
+- name: Vérifier si le fichier kubelet.conf existe
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Vérifier si le service kubelet est actif
+  service_facts:
+  register: service_state
+
+- name: Définir l'état de jonction du nœud
+  set_fact:
+    node_already_joined: "{{ kubelet_conf.stat.exists and service_state.ansible_facts.services['kubelet.service'] is defined and service_state.ansible_facts.services['kubelet.service'].state == 'running' }}"
+
 - name: Joindre les workers à leur cluster respectif
-  # Récupère la commande de jointure du PREMIER master du groupe spécifique au cluster du worker actuel
-  command: "{{ hostvars[groups[cluster_name + '_masters'][0]]['kubernetes_join_command'] }}"
+  shell: "{{ hostvars[groups[cluster_name + '_masters'][0]]['kubernetes_join_command'] }} --ignore-preflight-errors=all"
   register: join_result
-  # Condition pour s'assurer que la tâche ne s'exécute que sur les workers
-  # et que les informations nécessaires sont disponibles
-  when:
+  when: 
+    - not node_already_joined
     - inventory_hostname in groups['workers']
     - cluster_name is defined
     - groups[cluster_name + '_masters'] is defined and groups[cluster_name + '_masters'] | length > 0
     - hostvars[groups[cluster_name + '_masters'][0]]['kubernetes_join_command'] is defined
-   #Note: Vous pourriez aussi utiliser la condition plus spécifique suggérée dans la recherche :
-  #when: inventory_hostname in groups[cluster_name + '_workers']
-  # Cela dépend si le play cible déjà uniquement les workers ou un groupe plus large.
 
 - name: Afficher le résultat de la jointure
   ansible.builtin.debug:
-    var: join_result.stdout_lines # Affiche la sortie standard de la commande
+    var: join_result.stdout_lines
   when: join_result is defined and join_result.stdout_lines is defined

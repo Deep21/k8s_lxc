@@ -27,7 +27,7 @@
     lxd init --auto
   args:
     creates: /var/snap/lxd/common/lxd
-
+    
 - name: Vérifier si le pool existe déjà
   shell: lxc storage list --format csv | grep "^{{ pool_name }},"
   register: pool_exists
@@ -37,12 +37,13 @@
 - name: Créer le pool ZFS avec un fichier loop si aucun périphérique n'est spécifié
   command: /snap/bin/lxc storage create {{ pool_name }} zfs
   when:
-    - pool_exists.rc != 0
+    - pool_exists.rc != 0 or pool_exists.stdout == ''
 
 - name: Vérifier si le réseau LXD existe déjà
   shell: "lxc network list --format csv | grep -w '^{{ network_name }}'"
   register: network_check
-  ignore_errors: yes
+  failed_when: false
+  changed_when: false
 
 - name: Créer le réseau LXD s'il n'existe pas
   shell: >
@@ -57,7 +58,7 @@
 - name: Afficher le statut du réseau
   debug:
     msg: "Le réseau {{ network_name }} existe déjà ou a été créé."
-
+    
 - name: Vérifier si la clé SSH existe déjà
   stat:
     path: "{{ ssh_key_path }}"
