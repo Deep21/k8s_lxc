@@ -1,0 +1,260 @@
+---
+- name: Vérifier si le cluster est déjà initialisé
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: k8s_config_exists
+
+- name: Initialiser le cluster Kubernetes
+  shell: kubeadm init --pod-network-cidr=192.168.0.0/16 --ignore-preflight-errors=all
+  args:
+    creates: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+  when: not k8s_config_exists.stat.exists
+
+- name: Créer le répertoire .kube pour root
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0700'
+
+- name: Copier le fichier de configuration admin.conf pour root
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: yes
+    mode: '0600'
+  when: kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+- name: Créer le répertoire .kube pour l'utilisateur ubuntu
+  file:
+    path: /home/ubuntu/.kube
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0700'
+
+- name: Copier le fichier de configuration admin.conf pour l'utilisateur ubuntu
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/ubuntu/.kube/config
+    remote_src: yes
+    owner: ubuntu
+    group: ubuntu
+    mode: '0600'
+  when: kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+# Installation conditionnelle de Calico
+- name: Télécharger le manifeste Calico
+  get_url:
+    url: "{{ calico_manifest_url | default('https://docs.projectcalico.org/manifests/calico.yaml') }}"
+    dest: /home/ubuntu/calico.yaml
+    owner: ubuntu
+    group: ubuntu
+    mode: '0644'
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "calico"
+    - kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+- name: Appliquer le manifeste Calico
+  kubernetes.core.k8s:
+    state: present
+    src: /home/ubuntu/calico.yaml
+    kubeconfig: /home/ubuntu/.kube/config
+  become_user: ubuntu
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "calico"
+    - kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+# Installation conditionnelle de Cilium
+- name: Vérifier si Helm est installé
+  command: which helm
+  register: helm_check
+  failed_when: false
+  changed_when: false
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "cilium"
+
+- name: Installer Helm si nécessaire
+  shell: |
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "cilium"
+    - helm_check.rc != 0
+
+- name: Ajouter le repository Helm de Cilium
+  kubernetes.core.helm_repository:
+    name: cilium
+    repo_url: https://helm.cilium.io/
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "cilium"
+    - kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+- name: Installer Cilium via Helm
+  kubernetes.core.helm:
+    name: cilium
+    chart_ref: cilium/cilium
+    release_namespace: kube-system
+    values:
+      operator:
+        replicas: 1
+      hubble:
+        enabled: "{{ cilium_hubble_enabled | default(true) }}"
+        relay:
+          enabled: "{{ cilium_hubble_enabled | default(true) }}"
+        ui:
+          enabled: "{{ cilium_hubble_ui_enabled | default(false) }}"
+    kubeconfig: /home/ubuntu/.kube/config
+  become_user: ubuntu
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "cilium"
+    - kubeadm_init.changed or not k8s_config_exists.stat.exists
+
+# Vérifications communes
+- name: Attendre que les composants du control plane soient prêts
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - tier=control-plane
+    kubeconfig: /home/ubuntu/.kube/config
+  register: control_plane_pods
+  until: control_plane_pods.resources | selectattr('status.conditions', 'defined') | selectattr('status.conditions', 'selectattr', 'type', 'equalto', 'Ready') | selectattr('status.conditions', 'selectattr', 'status', 'equalto', 'True') | list | length == (control_plane_pods.resources | length)
+  retries: 30
+  delay: 10
+  become_user: ubuntu
+  changed_when: false
+  ignore_errors: true
+
+- name: Attendre que les pods CoreDNS soient prêts
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - k8s-app=kube-dns
+    kubeconfig: /home/ubuntu/.kube/config
+  register: coredns_pods
+  until: coredns_pods.resources | selectattr('status.conditions', 'defined') | selectattr('status.conditions', 'selectattr', 'type', 'equalto', 'Ready') | selectattr('status.conditions', 'selectattr', 'status', 'equalto', 'True') | list | length == (coredns_pods.resources | length)
+  retries: 30
+  delay: 10
+  become_user: ubuntu
+  changed_when: false
+  ignore_errors: true
+
+# Vérifications spécifiques à Calico
+- name: Attendre que les pods Calico soient prêts
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - k8s-app=calico-node
+    kubeconfig: /home/ubuntu/.kube/config
+  register: calico_pods
+  until: calico_pods.resources | selectattr('status.conditions', 'defined') | selectattr('status.conditions', 'selectattr', 'type', 'equalto', 'Ready') | selectattr('status.conditions', 'selectattr', 'status', 'equalto', 'True') | list | length == (calico_pods.resources | length)
+  retries: 30
+  delay: 10
+  become_user: ubuntu
+  changed_when: false
+  ignore_errors: true
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "calico"
+
+# Vérifications spécifiques à Cilium
+- name: Attendre que les pods Cilium soient prêts
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - k8s-app=cilium
+    kubeconfig: /home/ubuntu/.kube/config
+  register: cilium_pods
+  until: cilium_pods.resources | selectattr('status.conditions', 'defined') | selectattr('status.conditions', 'selectattr', 'type', 'equalto', 'Ready') | selectattr('status.conditions', 'selectattr', 'status', 'equalto', 'True') | list | length == (cilium_pods.resources | length)
+  retries: 30
+  delay: 10
+  become_user: ubuntu
+  changed_when: false
+  ignore_errors: true
+  when: 
+    - cni_plugin is defined
+    - cni_plugin == "cilium"
+
+- name: Vérifier l'état global du cluster
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    kubeconfig: /home/ubuntu/.kube/config
+  register: nodes_status
+  become_user: ubuntu
+  changed_when: false
+
+- name: Afficher l'état des nœuds
+  debug:
+    msg: "{{ item.metadata.name }}: {{ item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first }}"
+  loop: "{{ nodes_status.resources }}"
+  when: nodes_status.resources is defined
+
+- name: Vérifier que le nœud master est Ready
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    kubeconfig: /home/ubuntu/.kube/config
+  register: master_node_status
+  become_user: ubuntu
+  changed_when: false
+  failed_when: >
+    master_node_status.resources | length == 0 or
+    (master_node_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first) != "True"
+  ignore_errors: true
+  
+- name: Générer la commande de jonction pour les nœuds worker
+  shell: kubeadm token create --print-join-command
+  register: join_command
+  when: kubeadm_init is defined and (kubeadm_init.changed or k8s_config_exists.stat.exists)
+
+- name: Sauvegarder la commande de jonction dans un fichier
+  copy:
+    content: "{{ join_command.stdout }}"
+    dest: /root/join-command.txt
+    mode: '0644'
+  when: join_command is defined and join_command.stdout is defined
+
+- name: Afficher la commande de jonction
+  debug:
+    var: join_command.stdout
+  when: join_command is defined and join_command.stdout is defined
+
+- name: Stocker le token de jointure
+  set_fact:
+    kubernetes_join_command: "{{ join_command.stdout }} --ignore-preflight-errors=all"
+  when: join_command is defined and join_command.stdout is defined
+
+- name: Afficher le CNI plugin installé
+  debug:
+    msg: "CNI Plugin installé: {{ cni_plugin | default('aucun') }}"
+
+- name: Vérifier la connectivité réseau du CNI
+  shell: kubectl get pods -A -o wide | grep -E "(calico|cilium)"
+  register: cni_pods_status
+  become_user: ubuntu
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+  changed_when: false
+  ignore_errors: true
+
+- name: Afficher le statut des pods CNI
+  debug:
+    var: cni_pods_status.stdout_lines
+  when: cni_pods_status.stdout_lines is defined

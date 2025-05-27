@@ -1,0 +1,120 @@
+---
+- name: Installer ArgoCD avec Helm sur Kubernetes
+  hosts: localhost
+  become: false
+  vars_prompt:
+    - name: kubeconfig_file_path 
+      prompt: "Chemin vers le fichier kubeconfig à utiliser"
+      private: no
+      default: "~/.kube/config"
+
+    - name: kube_context_name
+      prompt: "Nom du contexte Kubernetes à utiliser (laisser vide pour utiliser le contexte courant du fichier)"
+      private: no
+      default: ""
+
+  vars:
+    argocd_namespace: argocd
+    argocd_helm_repo: "https://argoproj.github.io/argo-helm"
+    argocd_helm_chart: argo/argo-cd
+    argocd_helm_release: argocd
+    argocd_helm_version: ""
+    argocd_values_file: ""
+
+  tasks:
+    - name: Vérifier que le fichier kubeconfig existe
+      stat:
+        path: "{{ kubeconfig_file_path | expanduser }}"
+      register: kubeconfig_stat
+
+    - name: Échouer si le fichier kubeconfig n'existe pas
+      fail:
+        msg: "Le fichier kubeconfig '{{ kubeconfig_file_path | expanduser }}' n'existe pas"
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Vérifier si le contexte spécifié existe (si un contexte est fourni)
+      ansible.builtin.shell:
+        cmd: >
+          KUBECONFIG={{ kubeconfig_file_path | expanduser }}
+          kubectl config get-contexts -o name | grep -w "^{{ kube_context_name }}$"
+      register: context_check_result
+      changed_when: false
+      failed_when: false
+      when: kube_context_name | length > 0
+
+    - name: Échouer si le contexte spécifié n'existe pas (si un contexte est fourni)
+      ansible.builtin.fail:
+        msg: "Le contexte '{{ kube_context_name }}' n'a pas été trouvé dans '{{ kubeconfig_file_path | expanduser }}'."
+      when:
+        - kube_context_name | length > 0
+        - context_check_result.rc != 0
+
+    - name: Afficher le contexte qui sera utilisé
+      ansible.builtin.debug:
+        msg: "Utilisation du fichier kubeconfig '{{ kubeconfig_file_path | expanduser }}' avec le contexte '{{ kube_context_name | default('courant défini dans le fichier') }}'."
+
+    - name: Créer le namespace ArgoCD
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ argocd_namespace }}"
+        state: present
+        kubeconfig: "{{ kubeconfig_file_path | expanduser }}"
+        context: "{{ kube_context_name if kube_context_name | length > 0 else omit }}"
+
+    - name: Ajouter et mettre à jour le dépôt Helm ArgoCD
+      kubernetes.core.helm_repository:
+        name: argo
+        repo_url: "{{ argocd_helm_repo }}"
+        state: present
+        kubeconfig: "{{ kubeconfig_file_path | expanduser }}"
+        context: "{{ kube_context_name | default(omit) }}"
+        force_update: true
+
+    - name: Installer ArgoCD via Helm
+      kubernetes.core.helm:
+        name: "{{ argocd_helm_release }}"
+        chart_ref: "{{ argocd_helm_chart }}"
+        namespace: "{{ argocd_namespace }}"
+        create_namespace: false
+        chart_version: "{{ argocd_helm_version | default(omit) }}"  # Correction ici (version → chart_version)
+        values_files: "{{ argocd_values_file | default(omit) }}"    # Correction ici (values_file → values_files)
+        state: present
+        kubeconfig: "{{ kubeconfig_file_path | expanduser }}"
+        context: "{{ kube_context_name | default(omit) }}"
+      register: argocd_helm_result
+
+    - name: Attendre que le pod argocd-server soit prêt
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ argocd_namespace }}"
+        label_selectors:
+          - "app.kubernetes.io/name=argocd-server"
+        kubeconfig: "{{ kubeconfig_file_path | expanduser }}"
+        context: "{{ kube_context_name | default(omit) }}"
+      register: argocd_server_pods
+      until: >
+        argocd_server_pods.resources is defined and
+        argocd_server_pods.resources | length > 0 and
+        argocd_server_pods.resources[0].status is defined and
+        argocd_server_pods.resources[0].status.containerStatuses is defined and
+        argocd_server_pods.resources[0].status.containerStatuses | length > 0 and
+        argocd_server_pods.resources[0].status.containerStatuses[0].ready
+      retries: 30
+      delay: 15
+
+    - name: Afficher les informations sur les pods ArgoCD Server
+      ansible.builtin.shell:
+        cmd: >
+          KUBECONFIG={{ kubeconfig_file_path | expanduser }}
+          kubectl
+          {% if kube_context_name %}--context={{ kube_context_name }}{% endif %}
+          -n {{ argocd_namespace }}
+          get pods -l app.kubernetes.io/name=argocd-server
+      register: argocd_pods_status
+      changed_when: false
+
+    - name: Afficher la sortie des pods ArgoCD
+      ansible.builtin.debug:
+        var: argocd_pods_status.stdout

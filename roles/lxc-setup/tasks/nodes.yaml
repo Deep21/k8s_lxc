@@ -1,0 +1,79 @@
+---
+- name: "Créer le nœud master"
+  community.general.lxd_container:
+    name: "{{ item[0] }}-master-{{ item[1] }}"
+    state: started
+    source:
+      type: image
+      mode: pull
+      server: https://cloud-images.ubuntu.com/releases/
+      protocol: simplestreams
+      alias: "{{ lxd_image_alias | default('ubuntu/jammy') }}" # Ajout d'une valeur par défaut
+    profiles: ["{{ k8s_cluster.master.k8s_profile_name | default('default') }}"] # Ajout d'une valeur par défaut
+    wait_for_ipv4_addresses: true
+    timeout: 600
+  with_nested:
+    - "{{ cluster_names }}" # Utilise directement la liste passée
+    - "{{ range(1, k8s_master_node_count | int + 1) | list }}" # Assurer que c'est un entier
+  when: k8s_master_node_count | int > 0 # Assurer que c'est un entier
+
+- name: "Créer le nœud worker"
+  community.general.lxd_container:
+    name: "{{ item[0] }}-worker-{{ item[1] }}"
+    state: started
+    source:
+      type: image
+      mode: pull
+      server: https://cloud-images.ubuntu.com/releases/
+      protocol: simplestreams
+      alias: "{{ lxd_image_alias | default('ubuntu/jammy') }}" # Ajout d'une valeur par défaut
+    profiles: ["{{ k8s_cluster.master.k8s_profile_name | default('default') }}"] # Utilisation du même profil que master
+    wait_for_ipv4_addresses: true
+    timeout: 600
+  with_nested:
+    - "{{ cluster_names }}" # Utilise directement la liste passée
+    - "{{ range(1, k8s_worker_node_count | int + 1) | list }}" # Assurer que c'est un entier
+  when: k8s_worker_node_count | int > 0 # Assurer que c'est un entier
+
+- name: Récupérer la liste des conteneurs LXD pour chaque cluster
+  ansible.builtin.shell: |
+    lxc list "{{ item }}-" --format json
+  register: lxc_list_output
+  changed_when: false
+  loop: "{{ cluster_names }}" # Utilise directement la liste passée
+  loop_control:
+    label: "{{ item }}"
+
+- name: Generate cluster manifest files
+  ansible.builtin.copy:
+    content: |
+      ---
+      # K8s Cluster Manifest
+      
+      metadata:
+        cluster_name: "{{ item.item }}"
+        created_at: "{{ ansible_date_time.iso8601 }}"
+        master_count: {{ k8s_master_node_count }}
+        worker_count: {{ k8s_worker_node_count }}
+        lxd_image: "{{ lxd_image_alias }}"
+        creator: "{{ lookup('env', 'USER') }}"
+        provisioned: no
+        
+      nodes:
+        masters:
+      {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-master-') | list %}
+          - name: "{{ container.name }}"
+            status: "{{ container.status }}"
+            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+      {% endfor %}
+        workers:
+      {% for container in (item.stdout | from_json) | selectattr('name', 'match', item.item + '-worker-') | list %}
+          - name: "{{ container.name }}"
+            status: "{{ container.status }}"
+            ip: "{{ container.state.network.eth0.addresses | selectattr('family', 'eq', 'inet') | map(attribute='address') | first | default('') }}"
+      {% endfor %}
+    dest: "../data/manifest-{{ item.item }}.yaml"
+    mode: '0644'
+  loop: "{{ lxc_list_output.results }}"
+  loop_control:
+    label: "manifest-{{ item.item }}.yaml"

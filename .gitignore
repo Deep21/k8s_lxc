@@ -1,0 +1,5 @@
+data
+kubeconfig/*
+facts_cache/*
+facts_cache
+.ansible-venv

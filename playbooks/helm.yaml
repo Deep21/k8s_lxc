@@ -1,0 +1,57 @@
+---
+- name: Installer Helm sur les serveurs cibles
+  hosts: localhost
+  become: yes
+  vars:
+    helm_version: "v3.14.4"
+    helm_arch: "amd64"
+    helm_os: "linux"
+    helm_install_dir: "/usr/local/bin"
+    helm_tgz: "helm-{{ helm_version }}-{{ helm_os }}-{{ helm_arch }}.tar.gz"
+    helm_url: "https://get.helm.sh/{{ helm_tgz }}"
+
+  tasks:
+    - name: Vérifier si Helm est déjà installé
+      stat:
+        path: "{{ helm_install_dir }}/helm"
+      register: helm_stat
+
+    - name: Télécharger l'archive Helm
+      get_url:
+        url: "{{ helm_url }}"
+        dest: "/tmp/{{ helm_tgz }}"
+        mode: '0644'
+      when: not helm_stat.stat.exists
+
+    - name: Extraire le binaire Helm
+      unarchive:
+        src: "/tmp/{{ helm_tgz }}"
+        dest: "/tmp/"
+        remote_src: yes
+        creates: "/tmp/{{ helm_os }}-{{ helm_arch }}/helm"
+      when: not helm_stat.stat.exists
+
+    - name: Installer le binaire Helm
+      copy:
+        src: "/tmp/{{ helm_os }}-{{ helm_arch }}/helm"
+        dest: "{{ helm_install_dir }}/helm"
+        mode: '0755'
+      when: not helm_stat.stat.exists
+
+    - name: Nettoyer les fichiers temporaires
+      file:
+        path: "/tmp/{{ item }}"
+        state: absent
+      loop:
+        - "{{ helm_tgz }}"
+        - "{{ helm_os }}-{{ helm_arch }}"
+      when: not helm_stat.stat.exists
+
+    - name: Vérifier la version de Helm installée
+      command: "{{ helm_install_dir }}/helm version"
+      register: helm_version_output
+      changed_when: false
+
+    - name: Afficher la version de Helm
+      debug:
+        var: helm_version_output.stdout

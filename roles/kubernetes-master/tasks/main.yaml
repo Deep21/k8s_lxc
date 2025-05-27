@@ -1,0 +1,4 @@
+---
+- name: Inclure des tâches conditionnellement
+  include_tasks: master.yaml
+  when: inventory_hostname is regex('^.*-master-1$') and inventory_hostname.split('-')[0] == cluster_name

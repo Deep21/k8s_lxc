@@ -1,6 +1,0 @@
----
-- hosts: localhost   # Exécute sur la machine locale où Ansible est installé.
-  become: yes        # Nécessite des privilèges root.
-  roles:
-    - role: lxc-k8s-setup   # Appelle le rôle créé.
-

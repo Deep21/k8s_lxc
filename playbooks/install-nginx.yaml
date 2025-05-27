@@ -1,0 +1,158 @@
+---
+- name: Installation et configuration de Nginx avec loadbalancer
+  hosts: all
+  become: yes
+  vars_files:
+    - vars/main.yml
+  
+  tasks:
+    - name: Mise à jour du cache des paquets
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Installation de Nginx
+      package:
+        name: nginx
+        state: present
+
+    - name: Installation des dépendances
+      package:
+        name:
+          - curl
+          - htop
+          - net-tools
+        state: present
+
+    - name: Création du répertoire de configuration personnalisé
+      file:
+        path: /etc/nginx/conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Sauvegarde de la configuration Nginx par défaut
+      copy:
+        src: /etc/nginx/nginx.conf
+        dest: /etc/nginx/nginx.conf.backup
+        remote_src: yes
+        backup: yes
+      ignore_errors: yes
+
+    - name: Déploiement de la configuration Nginx personnalisée
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify:
+        - restart nginx
+        - reload nginx
+
+    - name: Création du répertoire web
+      file:
+        path: "{{ document_root }}"
+        state: directory
+        owner: "{{ nginx_user }}"
+        group: "{{ nginx_user }}"
+        mode: '0755'
+
+    - name: Création d'une page d'accueil personnalisée
+      template:
+        src: templates/index.html.j2
+        dest: "{{ document_root }}/index.html"
+        owner: "{{ nginx_user }}"
+        group: "{{ nginx_user }}"
+        mode: '0644'
+
+    - name: Test de la configuration Nginx
+      command: nginx -t
+      register: nginx_syntax
+      changed_when: false
+
+    - name: Affichage du résultat du test de configuration
+      debug:
+        var: nginx_syntax.stdout_lines
+
+    - name: Activation et démarrage du service Nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Configuration du firewall pour HTTP
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+      when: ansible_os_family == "Debian"
+
+    - name: Configuration du firewall pour le monitoring
+      ufw:
+        rule: allow
+        port: '8080'
+        proto: tcp
+      when: ansible_os_family == "Debian"
+
+    - name: Vérification du statut de Nginx
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}"
+        method: GET
+        status_code: 200
+      register: nginx_status
+      ignore_errors: yes
+
+    - name: Affichage du statut de la vérification
+      debug:
+        msg: "Nginx est {{ 'accessible' if nginx_status.status == 200 else 'inaccessible' }}"
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+- name: Configuration spécifique du loadbalancer
+  hosts: loadbalancer
+  become: yes
+  vars_files:
+    - vars/main.yml
+  
+  tasks:
+    - name: Installation d'outils de monitoring supplémentaires
+      package:
+        name:
+          - netstat-nat
+        state: present
+
+    - name: Création d'un script de vérification des backends
+      template:
+        src: templates/check_backends.sh.j2
+        dest: /usr/local/bin/check_backends.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configuration d'une tâche cron pour le monitoring
+      cron:
+        name: "Vérification des backends"
+        minute: "*/5"
+        job: "/usr/local/bin/check_backends.sh"
+        user: root
+
+    - name: Affichage des informations de configuration
+      debug:
+        msg:
+          - "Loadbalancer configuré sur: {{ loadbalancer_ip }}:{{ loadbalancer_port }}"
+          - "Backends configurés: {{ groups['webservers'] | map('extract', hostvars, 'ansible_host') | list }}"
+          - "Page de monitoring: http://{{ loadbalancer_ip }}:8080/health"
