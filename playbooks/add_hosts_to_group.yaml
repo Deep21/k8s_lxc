@@ -1,12 +1,8 @@
----
-# Ce fichier est inclus pour chaque cluster dans la boucle du playbook principal.
-# La variable 'current_cluster' est définie par la boucle appelante.
-
+# add_hosts_to_group.yaml
 - name: "Ajouter les hôtes du cluster '{{ current_cluster }}' au groupe 'target_hosts'"
   ansible.builtin.add_host:
-    name: "{{ host_item }}"  # Nom de l'hôte à ajouter
-    groups: target_hosts   # Groupe auquel ajouter l'hôte
-  # Boucle sur les masters ET les workers du cluster actuel ('current_cluster')
+    name: "{{ host_item }}"
+    groups: target_hosts
   loop: "{{ groups[current_cluster + '_masters'] | default([]) + groups[current_cluster + '_workers'] | default([]) }}"
   loop_control:
-    loop_var: host_item # Définit 'host_item' pour cette boucle simple
+    loop_var: host_item

@@ -14,10 +14,11 @@
 - name: Configuration du cluster Kubernetes
   hosts: localhost
   gather_facts: no
-  vars:
-    target_cluster: "{{ hostvars['localhost']['derived_target_cluster'] }}"
-
   tasks:
+    - name: Définir target_cluster comme fact
+      ansible.builtin.set_fact:
+        target_cluster: "{{ hostvars['localhost']['derived_target_cluster'] }}"
+
     - name: Rafraîchir l'inventaire pour détecter les nouveaux conteneurs
       ansible.builtin.meta: refresh_inventory
 

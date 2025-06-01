@@ -1,0 +1,127 @@
+- name: Déploiement Infrastructure LXC et Configuration Kubernetes
+  hosts: localhost
+  become: yes
+  gather_facts: yes
+  vars:
+    kubeconfig_dir: "/home/mini/ansible/kubeconfig"
+    output_file: "/home/mini/.kube/config"
+  
+  tasks:
+    - name: Transformer la liste cluster_names en chaîne target_cluster
+      ansible.builtin.set_fact:
+        derived_target_cluster: "{{ cluster_names | join(';') }}"
+
+    - name: Création de l'infrastructure LXC
+      ansible.builtin.include_role:
+        name: lxc-setup
+
+    - name: Définir target_cluster comme fact
+      ansible.builtin.set_fact:
+        target_cluster: "{{ derived_target_cluster }}"
+
+    - name: Rafraîchir l'inventaire pour détecter les nouveaux conteneurs
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Convertir la chaîne de clusters en liste
+      ansible.builtin.set_fact:
+        target_clusters: "{{ target_cluster.split(';') | map('trim') | list }}"
+      when: target_cluster is defined and target_cluster != 'all'
+
+    - name: Définir tous les clusters comme cibles si 'all' est spécifié
+      ansible.builtin.set_fact:
+        target_clusters: "{{ groups.keys() | select('match', '^((?!masters$|workers$|all$|ungrouped$).)') | list }}"
+      when: target_cluster is not defined or target_cluster == 'all'
+
+    - name: Afficher les clusters cibles
+      ansible.builtin.debug:
+        msg: "Clusters cibles: {{ target_clusters }}"
+
+    - name: Ajouter les hôtes pour chaque cluster cible au groupe 'target_hosts'
+      ansible.builtin.include_tasks: add_hosts_to_group.yaml
+      loop: "{{ target_clusters }}"
+      loop_control:
+        loop_var: current_cluster
+
+    - name: Afficher les hôtes cibles
+      ansible.builtin.debug:
+        msg: "Le groupe target_hosts contient: {{ groups['target_hosts'] | default([]) }}"
+      when: groups['target_hosts'] is defined
+
+- name: Configuration Kubernetes sur les Nœuds Cibles
+  hosts: target_hosts
+  become: yes
+  gather_facts: yes
+  roles:
+    - role: kubernetes-common
+    - role: kubernetes-master
+    - role: kubernetes-worker
+
+- name: Gestion des Kubeconfigs et Validation
+  hosts: localhost
+  gather_facts: no
+  vars:
+    kubeconfig_dir: "/home/mini/ansible/kubeconfig"
+    output_file: "/home/mini/.kube/config"
+
+  tasks:
+    - name: Vérifier et créer les répertoires kubeconfig
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+        owner: mini
+        group: mini
+      become: yes
+      loop:
+        - "{{ kubeconfig_dir }}"
+        - "/home/mini/.kube"
+
+    - name: Lire le contenu du fichier kubeconfig
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      register: kubeconfig_content
+      become: yes
+      delegate_to: "{{ groups[item + '_masters'][0] }}"
+      when:
+        - (item + '_masters') in groups
+        - groups[item + '_masters'] | length > 0
+      loop: "{{ target_clusters }}"
+      loop_control:
+        loop_var: item
+
+    - name: Créer le fichier kubeconfig en local
+      ansible.builtin.copy:
+        content: "{{ item.content | b64decode }}"
+        dest: "{{ kubeconfig_dir }}/config-{{ item.item }}"
+        mode: '0640'
+        owner: "mini"
+        group: "mini"
+      loop: "{{ kubeconfig_content.results }}"
+      when:
+        - item.content is defined
+      become: false
+
+    - name: Exécuter les tâches de mise à jour du kubeconfig
+      ansible.builtin.include_tasks: run_update_kubeconfig.yaml
+      vars:
+        script_path: "{{ playbook_dir }}/scripts/update_kubeconfig.py"
+
+    - name: Exécuter le script de vérification pour chaque cluster
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/check_nodes.py {{ kubeconfig_dir }}/config-{{ item }}"
+        executable: /usr/bin/python3
+      register: nodes_status
+      loop: "{{ target_clusters }}"
+      loop_control:
+        loop_var: item
+
+    - name: Exécuter le script de renommage pour les clusters prêts
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/rename_provisioned_manifest.py {{ item.item }} {{ playbook_dir }}"
+        executable: python3
+      loop: "{{ nodes_status.results }}"
+      when:
+        - item.rc == 0
+        - "'NotReady' not in item.stdout"
+      register: rename_script_result
+      changed_when: "'Renamed successfully' in item.stdout"

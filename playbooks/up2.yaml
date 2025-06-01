@@ -1,0 +1,146 @@
+---
+- name: Déploiement Infrastructure LXC et Configuration Kubernetes
+  hosts: localhost
+  become: yes
+  gather_facts: yes
+  vars:
+    kubeconfig_directory: "/home/mini/ansible/kubeconfig"
+    kubeconfig_output: "/home/mini/.kube/config"
+    excluded_groups: ['masters', 'workers', 'all', 'ungrouped']
+
+  tasks:
+    - name: Initialisation des clusters cibles
+      block:
+        - name: Transformation des noms de clusters
+          ansible.builtin.set_fact:
+            target_clusters: "{{ (cluster_names | default([])) + (['all'] if 'all' in cluster_names else []) }}"
+          when: cluster_names is defined
+
+        - name: Création de l'infrastructure LXC
+          ansible.builtin.include_role:
+            name: lxc-setup
+          vars:
+            target_clusters: "{{ target_clusters | default([]) }}"
+
+        - name: Actualisation dynamique de l'inventaire
+          ansible.builtin.meta: refresh_inventory
+          changed_when: false
+
+        - name: Définition finale des clusters
+          ansible.builtin.set_fact:
+            final_target_clusters: >-
+              {% if 'all' in target_clusters %}
+                {{ groups.keys() | difference(excluded_groups) | list }}
+              {% else %}
+                {{ target_clusters | unique | list }}
+              {% endif %}
+
+      rescue:
+        - name: Gestion d'erreur de déploiement
+          ansible.builtin.fail:
+            msg: "Échec critique lors du déploiement LXC"
+
+    - name: Validation des clusters
+      ansible.builtin.assert:
+        that:
+          - final_target_clusters | length > 0
+          - final_target_clusters is iterable
+        fail_msg: "Aucun cluster valide défini"
+
+    - name: Construction du groupe cible
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: target_hosts
+      loop: "{{ query('inventory_hostnames', final_target_clusters) }}"
+      loop_control:
+        label: "Ajout de {{ item }}"
+
+- name: Configuration des nœuds Kubernetes
+  hosts: target_hosts
+  become: yes
+  gather_facts: yes
+  order: sorted
+  pre_tasks:
+    - name: Vérification de la connectivité
+      ansible.builtin.ping:
+
+  roles:
+    - role: kubernetes-common
+      tags: common
+    - role: kubernetes-master
+      when: "'masters' in group_names"
+      tags: master
+    - role: kubernetes-worker
+      when: "'workers' in group_names"
+      tags: worker
+
+- name: Gestion des configurations d'accès
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Création des répertoires Kubeconfig
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+        owner: mini
+        group: mini
+      loop:
+        - "{{ kubeconfig_directory }}"
+        - dirname "{{ kubeconfig_output }}"
+      become: yes
+
+    - name: Récupération des configurations
+      block:
+        - name: Collecte des kubeconfig
+          ansible.builtin.slurp:
+            src: /etc/kubernetes/admin.conf
+          register: kubeconfigs
+          become: yes
+          delegate_to: "{{ groups[cluster + '_masters'][0] }}"
+          loop: "{{ final_target_clusters }}"
+          loop_control:
+            loop_var: cluster
+          when: 
+            - (cluster + '_masters') in groups
+            - groups[cluster + '_masters'] | length > 0
+          retries: 3
+          delay: 10
+
+        - name: Enregistrement local
+          ansible.builtin.copy:
+            content: "{{ item.content | b64decode }}"
+            dest: "{{ kubeconfig_directory }}/cluster-{{ item.item }}.conf"
+            mode: '0640'
+            owner: mini
+            group: mini
+          loop: "{{ kubeconfigs.results }}"
+          when: item.content is defined
+
+      rescue:
+        - name: Nettoyage des fichiers corrompus
+          ansible.builtin.file:
+            path: "{{ kubeconfig_directory }}"
+            state: absent
+          become: yes
+          ignore_errors: yes
+
+        - ansible.builtin.fail:
+            msg: "Échec de la récupération des kubeconfig"
+
+    - name: Intégration des configurations
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/update_kubeconfig.py {{ kubeconfig_directory }} {{ kubeconfig_output }}"
+        executable: python3
+      register: config_update
+      changed_when: "'modified' in config_update.stdout"
+
+    - name: Validation finale
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/cluster_check.py {{ item }}"
+        executable: python3
+      loop: "{{ final_target_clusters }}"
+      register: cluster_health
+      failed_when: 
+        - cluster_health.rc != 0
+        - "'CRITICAL' in cluster_health.stdout"

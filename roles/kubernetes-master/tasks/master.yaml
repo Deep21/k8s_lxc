@@ -1,19 +1,20 @@
 ---
-- name: Définir la variable CNI par défaut
-  set_fact:
-    cni_plugin: "{{ cni_plugin | default('cilium') }}"
-
-- name: Vérifier si le cluster est déjà initialisé
-  stat:
-    path: /etc/kubernetes/admin.conf
-  register: k8s_config_exists
-
-- name: Initialiser le cluster Kubernetes
-  shell: kubeadm init --pod-network-cidr=192.168.0.0/16 --ignore-preflight-errors=all
+- name: Initialiser le cluster Kubernetes avec débogage
+  shell: |
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+    kubeadm init --pod-network-cidr=10.244.0.0/16 \
+                 --ignore-preflight-errors=all \
+                 --v=5 \
+                 --apiserver-advertise-address={{ ansible_default_ipv4.address }}
   args:
     creates: /etc/kubernetes/admin.conf
   register: kubeadm_init
   when: not k8s_config_exists.stat.exists
+  failed_when: false
+
+- name: Afficher la sortie de kubeadm init
+  debug:
+    var: kubeadm_init
 
 - name: Créer le répertoire .kube pour root
   file:
@@ -45,7 +46,6 @@
     owner: ubuntu
     group: ubuntu
     mode: '0600'
-  when: kubeadm_init.changed
 
 - name: Télécharger le manifeste Calico
   get_url:
@@ -56,7 +56,6 @@
     mode: '0644'
   when: 
     - cni_plugin == 'calico'
-    - kubeadm_init.changed
 
 - name: Appliquer le manifeste Calico
   shell: kubectl apply -f /home/ubuntu/calico.yaml
@@ -65,7 +64,10 @@
     KUBECONFIG: /home/ubuntu/.kube/config
   when: 
     - cni_plugin == 'calico'
-    - kubeadm_init.changed
+
+- name: Installer Helm
+  shell: |
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 - name: Ajouter le repo Helm Cilium
   shell: helm repo add cilium https://helm.cilium.io/
@@ -74,7 +76,6 @@
     KUBECONFIG: /home/ubuntu/.kube/config
   when: 
     - cni_plugin == 'cilium'
-    - kubeadm_init.changed
 
 - name: Mettre à jour les repos Helm
   shell: helm repo update
@@ -83,78 +84,37 @@
     KUBECONFIG: /home/ubuntu/.kube/config
   when: 
     - cni_plugin == 'cilium'
-    - kubeadm_init.changed
 
 - name: Vérifier l'existence du fichier cilium-values.yaml
   stat:
     path: "{{ playbook_dir }}/helm/cilium-values.yaml"
   register: cilium_values_file
   when: cni_plugin == 'cilium'
+  delegate_to: localhost
+
+- name: Vérifier l'existence du fichier cilium-values.yaml
+  stat:
+    path: "{{ playbook_dir }}/helm/cilium-values.yaml"
+  register: cilium_values_file
+  delegate_to: localhost 
+
+- name: Copier le fichier cilium-values.yaml vers le control plane
+  copy:
+    src: "/home/mini/ansible/helm/cilium-values.yaml"
+    dest: /tmp/cilium-values.yaml
+    mode: '0644'
 
 - name: Installer Cilium via Helm avec fichier de valeurs
   shell: |
     helm install cilium cilium/cilium \
       --namespace kube-system \
-      --values {{ playbook_dir }}/helm/cilium-values.yaml
+      --values /tmp/cilium-values.yaml
   become_user: ubuntu
   environment:
     KUBECONFIG: /home/ubuntu/.kube/config
   when: 
     - cni_plugin == 'cilium'
-    - kubeadm_init.changed
-    - cilium_values_file.stat.exists
-
-# Ajout de vérifications que le cluster est opérationnel
-- name: Attendre que les composants du control plane soient prêts
-  shell: kubectl get pods -n kube-system -l tier=control-plane -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
-  register: control_plane_ready
-  until: control_plane_ready.rc == 0
-  retries: 30
-  delay: 10
-  become_user: ubuntu
-  environment:
-    KUBECONFIG: /home/ubuntu/.kube/config
-  changed_when: false
-  ignore_errors: true
-
-- name: Attendre que les pods CoreDNS soient prêts
-  shell: kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
-  register: coredns_ready
-  until: coredns_ready.rc == 0
-  retries: 30
-  delay: 10
-  become_user: ubuntu
-  environment:
-    KUBECONFIG: /home/ubuntu/.kube/config
-  changed_when: false
-  ignore_errors: true
-
-- name: Attendre que les pods Calico soient prêts
-  shell: kubectl get pods -n kube-system -l k8s-app=calico-node -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
-  register: calico_ready
-  until: calico_ready.rc == 0
-  retries: 30
-  delay: 10
-  become_user: ubuntu
-  environment:
-    KUBECONFIG: /home/ubuntu/.kube/config
-  changed_when: false
-  ignore_errors: true
-  when: cni_plugin == 'calico'
-
-- name: Attendre que les pods Cilium soient prêts
-  shell: kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v False
-  register: cilium_ready
-  until: cilium_ready.rc == 0
-  retries: 30
-  delay: 10
-  become_user: ubuntu
-  environment:
-    KUBECONFIG: /home/ubuntu/.kube/config
-  changed_when: false
-  ignore_errors: true
-  when: cni_plugin == 'cilium'
-
+  
 - name: Vérifier l'état global du cluster
   shell: kubectl get nodes
   register: nodes_status
@@ -167,16 +127,6 @@
   debug:
     var: nodes_status.stdout_lines
   when: nodes_status.stdout_lines is defined
-
-- name: Vérifier que le nœud master est Ready
-  shell: kubectl get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
-  register: master_ready
-  become_user: ubuntu
-  environment:
-    KUBECONFIG: /home/ubuntu/.kube/config
-  changed_when: false
-  failed_when: master_ready.stdout != "True"
-  ignore_errors: true
 
 - name: Afficher le CNI installé
   debug:

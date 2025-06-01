@@ -1,5 +1,5 @@
 # Configuration du CNI Plugin
-cni_plugin: "calico"  # ou "cilium"
+cni_plugin: "calico"  # ou "calico, cilium"
 
 # Configuration Calico (si utilisé)
 calico_manifest_url: "https://docs.projectcalico.org/manifests/calico.yaml"

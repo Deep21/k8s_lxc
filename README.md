@@ -39,6 +39,8 @@ k8s_lxc/
 
 ## Utilisation
 
+sudo ansible-playbook playbooks/up.yaml --extra-vars '{"cluster_names": ["dakund"]'}
+
 ### Déploiement d'un cluster
 sudo ansible-playbook -i inventory/inventory.py playbooks/first.yaml --extra-vars '{"cluster_names": ["production"], "k8s_worker_node_count": 3}'
 
